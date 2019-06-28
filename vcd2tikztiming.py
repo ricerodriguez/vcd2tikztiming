@@ -12,6 +12,7 @@ __status__ = "Prototype"
 import os
 import sys
 import pprint
+import tempfile
 
 from Verilog_VCD import parse_vcd, get_endtime
 # Verilog_VCD.py version 1.11 taken from
@@ -19,16 +20,38 @@ from Verilog_VCD import parse_vcd, get_endtime
 
 pp = pprint.PrettyPrinter(indent=4)
 
-fn = os.path.basename(__file__)
-fns = fn.split('.')
+# fn = os.path.basename(__file__)
+# fns = fn.split('.')
 
-vcd = parse_vcd(fns[0]+'.vcd')
+# vcd = parse_vcd(fns[0] + '.vcd')
+fnames = []
+try:
+    fn = sys.argv[1]
+    fns = fn.split('.')
+    vcd = parse_vcd(fn)
+except IndexError as err:
+    raise err
 
 start = 0
 end = get_endtime()
 scale = 1000
 
-for f in fns[1:-1]:
+# for arg in sys.argv:
+#     if arg.startswith('start='):
+#         start = int(arg[6:])
+#         if start > get_endtime():
+#             start = get_endtime()
+#         if start < 0:
+#             start = 0
+#         if start > end:
+#             start = end
+#        print("start: " + str(start))
+#         # print(start)
+#     elif arg.startswith('end='):
+#         end = int(arg[4:])
+#         print(end)
+
+for f in sys.argv:
     if f.startswith("start="):
         start = int(f[6:])
         if start > get_endtime():
@@ -52,60 +75,73 @@ for f in fns[1:-1]:
         if scale < 0:
             scale = abs(scale)
 #        print("scale: " + str(scale))
-
+with open(fns[0] + '_timecodes.tex','w+') as fcodes:
+      tcdata = ('\\providecommand\\timeStart{0}\n'
+                '\\renewcommand\n'
+                '\\timeStart{'+str(start*1./scale)+'}\n'
+                '\\providecommand\\timeEnd{0}'
+                '\\renewcommand\\timeEnd{'+str(end*1./scale)+'}\n')
+      fcodes.writelines(tcdata)
 
 data = {}
+# print('vcd is ',vcd)
 for d in vcd:
     tv = [(t[0], t[1], i) for i, t in enumerate(vcd[d]['tv'])]
-
+    # print('tv is ',tv)
     results = [(t[0], t[1], t[2]) for t in tv if t[0] > start and t[0] < end]
-    if results[0][0] > start and results[0][2] > 0:
-        results.insert(
-                       0, (
-                           start,
-                           tv[results[0][2] - 1][1],
-                           tv[results[0][2] - 1][2]
+    # print('results is',results)
+    try:
+        if results[0][0] > start and results[0][2] > 0:
+            results.insert(
+                           0, (
+                               start,
+                               tv[results[0][2] - 1][1],
+                               tv[results[0][2] - 1][2]
+                              )
                           )
-                      )
-    if results[-1][0] < end and results[-1][2] < tv[-1][2]:
-        results.append(
-                       (
-                        end,
-                        tv[results[-1][2] + 1][1],
-                        tv[results[-1][2] + 1][2]
-                       )
-                      )
+        if results[-1][0] < end and results[-1][2] < tv[-1][2]:
+            results.append(
+                           (
+                            end,
+                            tv[results[-1][2] + 1][1],
+                            tv[results[-1][2] + 1][2]
+                           )
+                          )
 
-    u = results[0]
-    dv = []
-    for v in results[1:]:
+        u = results[0]
+        dv = []
+        for v in results[1:]:
+            dv.append(
+                      (
+                       (v[0]-u[0])*1./scale,
+                       u[1]
+                      )
+                     )
+            u = v
         dv.append(
                   (
-                   (v[0]-u[0])*1./scale,
+                   (end-u[0])*1./scale,
                    u[1]
                   )
                  )
-        u = v
-    dv.append(
-              (
-               (end-u[0])*1./scale,
-               u[1]
-              )
-             )
-    data = {
-            **data,
-            **dict(
-                   [
-                    (
-                     vcd[d]['nets'][0]['name'],
-                     (
-                      vcd[d]['nets'][0]['size'],
-                      dv
-                     )
-                    )
-                   ]
-                  )
-           }
+        name_fix = str(vcd[d]['nets'][0]['name']).replace('_','\_')
+        data = {
+                **data,
+                **dict(
+                       [
+                        (
+                         # vcd[d]['nets'][0]['name'],
+                            name_fix,
+                         (
+                          vcd[d]['nets'][0]['size'],
+                          dv
+                         )
+                        )
+                       ]
+                      )
+               }
+    except:
+        pass
 
 for d in data:
     s = d + " & "
@@ -125,16 +161,55 @@ for d in data:
                 s = s + str(i[0]) + "U"
         else:
             s = s + str(i[0]) + "D{" + hex(int(i[1], 2)) + "}"
-    s = s + " \\\\"
-    f = open(fns[0] + "_" + d + ".dmp", "w")
+    s = s + " \\\\\n"
+    fname = fns[0] + "_" + d + ".dmp"
+    fnames.append(fname)
+    f = open(fname, "w")
     f.write(s)
     f.close()
 
-if os.path.isfile(fns[0] + ".tmp"):
-    f = open(fns[0] + "_timecodes.tex", "w")
-    f.write("\\providecommand\\timeStart{0}")
-    f.write("\\renewcommand\\timeStart{" + str(start*1./scale) + "}")
-    f.write("\\providecommand\\timeEnd{0}")
-    f.write("\\renewcommand\\timeEnd{" + str(end*1./scale) + "}")
-    f.close()
-    os.system("latexpand " + fns[0] + ".tmp > " + fns[0] + ".tex")
+eof = ('\\begin{extracode}'
+       '\\input{%s_timecodes.tex}\\timingaxis[10]\\relax'
+       '\\end{extracode}'
+
+       '  \\end{tikztimingtable}\n'
+       '\\end{preview}\n'
+       '\\end{document}\n' % fns[0])
+
+with open('tikztimingtemplate.tex','r') as ftikz:
+    data = ftikz.readlines()
+# i=24
+# print(fnames)
+for dmp in fnames:
+    # print(dmp)
+    data.append('\n')
+    data.append('\input{%s}\n' % dmp)
+    # print(data[i])
+    # i+=1
+
+try:
+    os.remove(fns[0] + '.tmp')
+    os.remove(fns[0] + '.tex')
+except:
+    pass
+
+with open(fns[0] + '.tmp','a+') as template:
+    template.writelines(data)
+    template.writelines(eof)
+
+with open(fns[0] + '.tex','w+') as final:
+    os.system('latexpand ' + fns[0] + '.tmp > ' + fns[0] + '.tex')
+
+try:
+    os.remove(fns[0] + '.tmp')
+    os.remove(fns[0] + '_timecodes.tex')
+    for dmp in fnames:
+        os.remove(dmp)
+except:
+    pass
+
+# for dmp in fnames:
+#     try:
+#         os.remove(dmp)
+#     except:
+#         pass
