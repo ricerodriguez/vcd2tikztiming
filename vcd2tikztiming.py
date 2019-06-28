@@ -19,12 +19,8 @@ from Verilog_VCD import parse_vcd, get_endtime
 # https://pypi.org/project/Verilog_VCD/#files
 
 pp = pprint.PrettyPrinter(indent=4)
-
-# fn = os.path.basename(__file__)
-# fns = fn.split('.')
-
-# vcd = parse_vcd(fns[0] + '.vcd')
 fnames = []
+
 try:
     fn = sys.argv[1]
     fns = fn.split('.')
@@ -36,24 +32,9 @@ start = 0
 end = get_endtime()
 scale = 1000
 
-# for arg in sys.argv:
-#     if arg.startswith('start='):
-#         start = int(arg[6:])
-#         if start > get_endtime():
-#             start = get_endtime()
-#         if start < 0:
-#             start = 0
-#         if start > end:
-#             start = end
-#        print("start: " + str(start))
-#         # print(start)
-#     elif arg.startswith('end='):
-#         end = int(arg[4:])
-#         print(end)
-
 for f in sys.argv:
     if f.startswith("start="):
-        start = int(f[6:])
+        start = 1000*int(f[6:])
         if start > get_endtime():
             start = get_endtime()
         if start < 0:
@@ -62,7 +43,7 @@ for f in sys.argv:
             start = end
 #        print("start: " + str(start))
     elif f.startswith("end="):
-        end = int(f[4:])
+        end = 1000*int(f[4:])
         if end > get_endtime():
             end = get_endtime()
         if end < 0:
@@ -167,25 +148,40 @@ for d in data:
     f = open(fname, "w")
     f.write(s)
     f.close()
-
-eof = ('\\begin{extracode}'
-       '\\input{%s_timecodes.tex}\\timingaxis[10]\\relax'
-       '\\end{extracode}'
-
+bof =  ('\\documentclass{article}\n'
+        '\\usepackage[active,tightpage]{preview}\n'
+        '\\usepackage{tikz-timing}\n'
+        '\\usepackage{fp}\n'
+        '\\usepackage{siunitx}\n'
+        '%% timingaxis from https://tex.stackexchange.com/questions/67821/tikz-timing-is-there-a-straightforward-way-to-add-a-numbered-time-axis\n'
+        '\\providecommand\\timeStart{0}\n'
+        '\\newcommand{\\timingaxis}[1][1]{%\n'
+        '  \\begin{scope}\n'
+        '  \\draw [timing/table/axis] (0,-2*\\nrows+1) -- (\\twidth,-2*\\nrows+1);\n'
+        '  \\foreach \\n in {0,#1,...,\\twidth} {\n'
+        '    \\draw [timing/table/axis ticks]\n'
+        '        (\\n,-2*\\nrows+1+.1) -- +(0,-.2)\n'
+        '        node [below,inner sep=2pt] {\\scalebox{.75}{\\tiny\\FPeval\\result{clip(\\timeStart+\\n)}\\num{\\result}}};\n'
+        '  }\n'
+        '  \\end{scope}\n'
+        '}\n'
+        '\\tikzset{%\n'
+        '    timing/table/axis/.style={->,>=latex},\n'
+        '    timing/table/axis ticks/.style={},\n'
+        '}\n'
+        '\\begin{document}\n'
+        '\\begin{preview}\n'
+        '  \\begin{tikztimingtable}[xscale=1]\n')
+eof = ('\\begin{extracode}\n'
+       '\\input{%s_timecodes.tex}\\timingaxis[10]\\relax\n'
+       '\\end{extracode}\n'
        '  \\end{tikztimingtable}\n'
        '\\end{preview}\n'
        '\\end{document}\n' % fns[0])
 
-with open('tikztimingtemplate.tex','r') as ftikz:
-    data = ftikz.readlines()
-# i=24
-# print(fnames)
 for dmp in fnames:
-    # print(dmp)
-    data.append('\n')
-    data.append('\input{%s}\n' % dmp)
-    # print(data[i])
-    # i+=1
+    line = '\input{%s}\n'%dmp
+    bof+=line
 
 try:
     os.remove(fns[0] + '.tmp')
@@ -194,7 +190,7 @@ except:
     pass
 
 with open(fns[0] + '.tmp','a+') as template:
-    template.writelines(data)
+    template.writelines(bof)
     template.writelines(eof)
 
 with open(fns[0] + '.tex','w+') as final:
@@ -208,8 +204,3 @@ try:
 except:
     pass
 
-# for dmp in fnames:
-#     try:
-#         os.remove(dmp)
-#     except:
-#         pass
