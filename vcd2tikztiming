@@ -1,12 +1,13 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-__author__ = "Ernst Blecha, https://github.com/ernstblecha/vcd2tikztiming"
+__author__ = "Ernst Blecha, Victoria (Rice) Rodriguez"
 __copyright__ = "Copyright 2018"
-__credits__ = ["Sameer Gauria", "Florian Dietachmayr"]
+__credits__ = ["Florian Dietachmayr",
+               "Sameer Gauria"]
 __license__ = "GPL"
 __version__ = "0.0.2"
-__maintainer__ = "Ernst Blecha"
-__email__ = "ernst.blecha@gmail.com"
+__maintainer__ = "Victoria (Rice) Rodriguez" # of this fork, Ernst Blecha is probably still maintaining the original
+__email__ = "rice.rodriguez@ttu.edu"
 __status__ = "Prototype"
 
 import os
@@ -34,7 +35,7 @@ scale = 1000
 
 for f in sys.argv:
     if f.startswith("start="):
-        start = 1000*int(f[6:])
+        start = scale*int(f[6:])
         if start > get_endtime():
             start = get_endtime()
         if start < 0:
@@ -43,7 +44,7 @@ for f in sys.argv:
             start = end
 #        print("start: " + str(start))
     elif f.startswith("end="):
-        end = 1000*int(f[4:])
+        end = scale*int(f[4:])
         if end > get_endtime():
             end = get_endtime()
         if end < 0:
@@ -65,7 +66,7 @@ with open(fns[0] + '_timecodes.tex','w+') as fcodes:
       fcodes.writelines(tcdata)
 
 data = {}
-# print('vcd is ',vcd)
+print('vcd is ',vcd)
 for d in vcd:
     tv = [(t[0], t[1], i) for i, t in enumerate(vcd[d]['tv'])]
     # print('tv is ',tv)
@@ -106,6 +107,7 @@ for d in vcd:
                   )
                  )
         name_fix = str(vcd[d]['nets'][0]['name']).replace('_','\_')
+        # print(name_fix)
         data = {
                 **data,
                 **dict(
