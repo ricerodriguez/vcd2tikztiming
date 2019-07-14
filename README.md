@@ -70,7 +70,9 @@ Of course, don't forget to mark the scripts as executables with `cd /path/to/scr
 
 You should then be able to call it from any location.
 
-## Usage
+## Usage (Obsolete)
+
+**The following instructions don't apply anymore. Documentation will be updated soon.**
 
 Navigate to a directory with the VCD file you want to convert to a tikz-timing diagram.
 

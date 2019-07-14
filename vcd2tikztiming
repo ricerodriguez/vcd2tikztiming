@@ -14,195 +14,340 @@ import os
 import sys
 import pprint
 import tempfile
-
+import argparse
+import logging
 from Verilog_VCD import parse_vcd, get_endtime
-# Verilog_VCD.py version 1.11 taken from
-# https://pypi.org/project/Verilog_VCD/#files
-
-pp = pprint.PrettyPrinter(indent=4)
-fnames = []
-
+path_to_this = os.path.split(__file__)[0]
+log_fname = path_to_this+'/vcd2tikz.log'
+logging.basicConfig(filename=log_fname)
 try:
-    fn = sys.argv[1]
-    fns = fn.split('.')
-    vcd = parse_vcd(fn)
-except IndexError as err:
-    raise err
+    os.remove(log_fname)
+except FileNotFoundError:
+    log_file = open(log_fname,'w+')
+logger = logging.getLogger('VCD2Tikz')
+log_cmd = logging.StreamHandler()
+logger.addHandler(log_cmd)
 
-start = 0
-end = get_endtime()
-scale = 1000
+class Error(Exception):
+    pass
 
-for f in sys.argv:
-    if f.startswith("start="):
-        start = scale*int(f[6:])
-        if start > get_endtime():
-            start = get_endtime()
-        if start < 0:
-            start = 0
-        if start > end:
-            start = end
-#        print("start: " + str(start))
-    elif f.startswith("end="):
-        end = scale*int(f[4:])
-        if end > get_endtime():
-            end = get_endtime()
-        if end < 0:
-            end = 0
-        if end < start:
-            end = start
-#        print("end: " + str(end))
-    elif f.startswith("scale="):
-        scale = int(f[6:])
-        if scale < 0:
-            scale = abs(scale)
-#        print("scale: " + str(scale))
-with open(fns[0] + '_timecodes.tex','w+') as fcodes:
-      tcdata = ('\\providecommand\\timeStart{0}\n'
-                '\\renewcommand\n'
-                '\\timeStart{'+str(start*1./scale)+'}\n'
-                '\\providecommand\\timeEnd{0}'
-                '\\renewcommand\\timeEnd{'+str(end*1./scale)+'}\n')
-      fcodes.writelines(tcdata)
+class InvalidVCDError(Error):
+    def __init__(self,msg):
+        self.msg=msg
+        logger.error(msg)
 
-data = {}
-print('vcd is ',vcd)
-for d in vcd:
-    tv = [(t[0], t[1], i) for i, t in enumerate(vcd[d]['tv'])]
-    # print('tv is ',tv)
-    results = [(t[0], t[1], t[2]) for t in tv if t[0] > start and t[0] < end]
-    # print('results is',results)
-    try:
-        if results[0][0] > start and results[0][2] > 0:
-            results.insert(
-                           0, (
-                               start,
-                               tv[results[0][2] - 1][1],
-                               tv[results[0][2] - 1][2]
-                              )
-                          )
-        if results[-1][0] < end and results[-1][2] < tv[-1][2]:
-            results.append(
-                           (
-                            end,
+class InputReadyArgsError(Error):
+    def __init__(self,msg):
+        self.msg=msg
+        logger.error(msg)
+
+class ImproperSetupError(Error):
+    def __init__(self,msg):
+        self.msg=msg
+        logger.error(msg)
+
+class VCD2TikzTiming:
+    def __init__(self,args):
+        self.args = args
+        logger.debug('Arguments stored.')
+        self.templates_path = os.path.join(path_to_this,'templates')
+        self.header_path = os.path.join(self.templates_path,'header.tex')
+        self.timecodes_path = self.args.texfile[:-4] + '_timecodes.tex'
+
+    def check_errs(self):
+        # First check if VCD file is valid
+        try:
+            logger.debug('Checking if VCD is a valid file...')
+            self.vcd_parsed = parse_vcd(self.args.dumpfile)
+        except:
+            msg = 'The file %s either does not exist or is not a valid VCD file. Please try again.' % self.args.dumpfile
+            raise InvalidVCDError(msg)
+
+        logger.debug('VCD file is valid.')        
+
+    # Eventually deprecate this with just using defaults from argparse
+    def build_defaults(self):
+        if self.args.begin is None:
+            logger.debug('User did not provide begin time, using 0 as default.')
+            self.args.begin = 0
+        if self.args.end is None:
+            logger.debug('User did not provide end time, using Verilog to VCD package to determine end time.')
+            self.args.end = get_endtime()
+            # print(self.args.end)
+        if self.args.scale is None:
+            logger.debug('User did not provide scale, using 1000 (ns) as default.')
+            self.args.scale = 1000
+
+    def build_template(self):
+        logger.debug('Began building template')
+        try:
+            with open(self.header_path) as f_header:
+                self.header = f_header.readlines()
+        except FileNotFoundError as err:
+            msg = 'Could not find header file. Check your installation setup and try again.'
+            raise ImproperSetupError(msg)
+
+        self.w_timecodes = ('  \\providecommand\\timeStart{0}\\renewcommand\\timeStart{'+str(self.args.begin*1./self.args.scale)+'.0}\n'
+                            '  \\providecommand\\timeEnd{0}\\renewcommand\\timeEnd{'+str(self.args.end*1./self.args.scale)+'}\n')
+        with open(self.timecodes_path,'w+') as f_timecodes:
+            f_timecodes.writelines(self.w_timecodes)
+        if not self.args.axis and not self.args.input_ready:
+            try:
+                with open(os.path.join(self.templates_path,'bof-00.tex')) as f:
+                    self.w_bof = f.readlines()
+                with open(os.path.join(self.templates_path,'eof-00.tex')) as f:
+                    self.w_eof = f.readlines()                    
+            except FileNotFoundError:
+                msg = 'Could not find template file. Check your installation setup and try again.'
+                raise ImproperSetupError(msg)
+        elif not self.args.axis and self.args.input_ready:
+            try:
+                with open(os.path.join(self.templates_path,'bof-01.tex')) as f:
+                    self.w_bof = f.readlines()
+                with open(os.path.join(self.templates_path,'eof-01.tex')) as f:
+                    self.w_eof = f.readlines()
+                    self.w_eof[1] = '    \\input{%s_timecodes.tex}' % self.args.texfile[:-4]
+            except FileNotFoundError:
+                msg = 'Could not find template file. Check your installation setup and try again.'
+                raise ImproperSetupError(msg)
+        elif self.args.axis and not self.args.input_ready:
+            try:
+                with open(os.path.join(self.templates_path,'bof-10.tex')) as f:
+                    self.w_bof = f.readlines()
+                with open(os.path.join(self.templates_path,'eof-10.tex')) as f:
+                    self.w_eof = f.readlines()
+            except FileNotFoundError:
+                msg = 'Could not find template file. Check your installation setup and try again.'
+                raise ImproperSetupError(msg)
+        elif self.args.axis and self.args.input_ready:
+            try:
+                with open(os.path.join(self.templates_path,'bof-11.tex')) as f:
+                    self.w_bof = f.readlines()
+                with open(os.path.join(self.templates_path,'eof-11.tex')) as f:
+                    self.w_eof = f.readlines()
+                    self.w_eof[1] = '    \\input{%s_timecodes.tex}' % self.args.texfile[:-4]
+            except FileNotFoundError:
+                msg = 'Could not find template file. Check your installation setup and try again.'
+                raise ImproperSetupError(msg)
+
+    def build_dataset(self):
+        sig_dump_base_name = self.args.texfile[:-4]
+        data = {}
+        vcd = self.vcd_parsed
+        # Gather the useful information from parsing the VCD
+        for d in vcd:
+            tv = [(t[0], t[1], i) for i, t in enumerate(vcd[d]['tv'])]
+            logger.info('Value of tv is {}'.format(pprint.pformat(tv)))
+            results = [(t[0], t[1], t[2]) for t in tv if t[0] > self.args.begin and t[0] < self.args.end]
+            logger.info('Value of results is {}'.format(pprint.pformat(results)))
+            try:
+                if results[0][0] > self.args.begin and results[0][2] > 0:
+                    results.insert(
+                        0, (
+                            self.args.begin,
+                            tv[results[0][2] - 1][1],
+                            tv[results[0][2] - 1][2]
+                        )
+                    )
+                    
+                if results[-1][0] < self.args.end and results[-1][2] < tv[-1][2]:
+                    results.append(
+                        (
+                            self.args.end,
                             tv[results[-1][2] + 1][1],
                             tv[results[-1][2] + 1][2]
-                           )
-                          )
-
-        u = results[0]
-        dv = []
-        for v in results[1:]:
-            dv.append(
-                      (
-                       (v[0]-u[0])*1./scale,
-                       u[1]
-                      )
-                     )
-            u = v
-        dv.append(
-                  (
-                   (end-u[0])*1./scale,
-                   u[1]
-                  )
-                 )
-        name_fix = str(vcd[d]['nets'][0]['name']).replace('_','\_')
-        # print(name_fix)
-        data = {
-                **data,
-                **dict(
-                       [
-                        (
-                         # vcd[d]['nets'][0]['name'],
-                            name_fix,
-                         (
-                          vcd[d]['nets'][0]['size'],
-                          dv
-                         )
                         )
-                       ]
-                      )
-               }
-    except:
-        pass
+                    )
 
-for d in data:
-    s = d + " & "
-    for i in data[d][1]:
-        if data[d][0] == "1":
-            if i[0] == 0:
-                s = s + "G"
-            elif i[1] == "0":
-                s = s + str(i[0]) + "L"
-            elif i[1] == "1":
-                s = s + str(i[0]) + "H"
-            elif i[1] == "z" or i[1] == "Z":
-                s = s + str(i[0]) + "Z"
-            elif i[1] == "x" or i[1] == "X":
-                s = s + str(i[0]) + "X"
-            else:
-                s = s + str(i[0]) + "U"
-        else:
-            s = s + str(i[0]) + "D{" + hex(int(i[1], 2)) + "}"
-    s = s + " \\\\\n"
-    fname = fns[0] + "_" + d + ".dmp"
-    fnames.append(fname)
-    f = open(fname, "w")
-    f.write(s)
-    f.close()
-bof =  ('\\documentclass{article}\n'
-        '\\usepackage[active,tightpage]{preview}\n'
-        '\\usepackage{tikz-timing}\n'
-        '\\usepackage{fp}\n'
-        '\\usepackage{siunitx}\n'
-        '%% timingaxis from https://tex.stackexchange.com/questions/67821/tikz-timing-is-there-a-straightforward-way-to-add-a-numbered-time-axis\n'
-        '\\providecommand\\timeStart{0}\n'
-        '\\newcommand{\\timingaxis}[1][1]{%\n'
-        '  \\begin{scope}\n'
-        '  \\draw [timing/table/axis] (0,-2*\\nrows+1) -- (\\twidth,-2*\\nrows+1);\n'
-        '  \\foreach \\n in {0,#1,...,\\twidth} {\n'
-        '    \\draw [timing/table/axis ticks]\n'
-        '        (\\n,-2*\\nrows+1+.1) -- +(0,-.2)\n'
-        '        node [below,inner sep=2pt] {\\scalebox{.75}{\\tiny\\FPeval\\result{clip(\\timeStart+\\n)}\\num{\\result}}};\n'
-        '  }\n'
-        '  \\end{scope}\n'
-        '}\n'
-        '\\tikzset{%\n'
-        '    timing/table/axis/.style={->,>=latex},\n'
-        '    timing/table/axis ticks/.style={},\n'
-        '}\n'
-        '\\begin{document}\n'
-        '\\begin{preview}\n'
-        '  \\begin{tikztimingtable}[xscale=1]\n')
-eof = ('\\begin{extracode}\n'
-       '\\input{%s_timecodes.tex}\\timingaxis[10]\\relax\n'
-       '\\end{extracode}\n'
-       '  \\end{tikztimingtable}\n'
-       '\\end{preview}\n'
-       '\\end{document}\n' % fns[0])
+                u = results[0]
+                dv = []
+                for v in results[1:]:
+                    dv.append(
+                        (
+                            (v[0]-u[0])*1./self.args.scale,
+                            u[1]
+                        )
+                    )
+                    u = v
+                dv.append(
+                    (
+                        (self.args.end-u[0])*1./self.args.scale,
+                        u[1]
+                    )
+                )
+                name_fix = str(vcd[d]['nets'][0]['name']).replace('_','\_')
+                logger.debug('Fixed name: {}'.format(name_fix))
+                # print(name_fix)
+                data = {
+                    **data,
+                    **dict(
+                        [
+                            (
+                                # vcd[d]['nets'][0]['name'],
+                                name_fix,
+                                (
+                                    vcd[d]['nets'][0]['size'],
+                                    dv
+                                )
+                            )
+                        ]
+                    )
+                }
 
-for dmp in fnames:
-    line = '\input{%s}\n'%dmp
-    bof+=line
+            except IndexError:
+                pass
 
+        return data
+
+    def write_tikz_temps(self,data):
+        fnames = []
+        sig_dump_base_name = self.args.texfile[:-4]
+        logger.info('Dataset: \n{}'.format(pprint.pformat(data)))
+        for d in data:
+            logger.debug('Iterating through data, at {}'.format(d))
+            s = d + " & "
+            for i in data[d][1]:
+                # logger.debug('Iterating through data[d][1], at {}'.format(i))
+                # First check if the signal is high impedance or unknown/don't care
+                # logger.info('i[1] is {}'.format(i[1]))
+                if i[1] == "z" or i[1] == "Z":
+                    logger.debug('Found high impedance in signal.')
+                    s = s + str(i[0]) + "Z"
+                elif i[1] == "x" or i[1] == "X":
+                    logger.debug('Found unknown in signal.')
+                    s = s + str(i[0]) + "X"
+                if data[d][0] == "1":
+                    if i[0] == 0:
+                        s = s + "G"
+                    elif i[1] == "0":
+                        if (d == 'clk'):
+                            s = s + str(i[0]) + 'C'
+                        elif self.args.transitions:
+                            s = s + str(i[0]) + "L"
+                        else:
+                            s = s + str(i[0]) + 'C'
+                    elif i[1] == "1":
+                        if (d == 'clk'):
+                            s = s + str(i[0]) + 'C'
+                        elif self.args.transitions:
+                            s = s + str(i[0]) + "H"
+                        else:
+                            s = s + str(i[0]) + 'C'
+                    else:
+                        s = s + str(i[0]) + "U"
+                else:
+                    # Eventually move this out of the if block since it should happen for both cases
+                    try:
+                        s = s + str(i[0]) + "D{" + hex(int(i[1], 2)) + "}"
+                    except:
+                        if (i[1] == 'x' or i[1] == 'X'):
+                            s = s + str(i[0]) + 'U'
+                    
+            s = s + " \\\\\n"
+            fname = sig_dump_base_name + "_" + d + ".dmp"
+            fnames.append(fname)
+            f = open(fname, "w")
+            f.write(s)
+            f.close()
+
+        return fnames
+
+    def clean(self,fnames):
+        # Make temp file name
+        fname_tmp = self.args.texfile[:-4]+'.tmp'
+        for dmp in fnames:
+            line = '\input{%s}\n'%dmp
+            self.w_bof+=line
+
+        logger.debug('Clearing out any previously generated texfile of the same name')
+        try:
+            os.remove(fname_tmp)
+            os.remove(self.args.texfile)
+        except FileNotFoundError:
+            pass
+
+        with open(fname_tmp,'w+') as ftmp:
+            ftmp.writelines(self.w_bof)
+            ftmp.writelines(self.w_eof)
+
+        logger.debug('Wrote lines to temp file')
+        with open(self.args.texfile,'w+') as final:
+            os.system('latexpand {} > {}'.format(fname_tmp,self.args.texfile))
+
+        logger.debug('Used latexpand to insert into file')
+        try:
+            os.remove(fname_tmp)
+            logger.debug('Cleaned out the temp file')
+        except FileNotFoundError:
+            logger.warning('Could not remove temp file')
+            pass
+        
+        try:
+            os.remove(self.args.texfile[:-4]+'_timecodes.tex')
+            logger.debug('Cleaned out the timecodes file')
+        except FileNotFoundError:
+            logger.warning('Could not remove timecodes file')
+            pass
+
+        for dmp in fnames:
+            try:
+                os.remove(dmp)
+                logger.debug('Removed {}'.format(dmp))
+            except FileNotFoundError:
+                logger.warning('Could not remove {}'.format(dmp))
+                continue
+
+        
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='Converts VCD files to tikz-timing compatible files')
+    parser.add_argument('dumpfile',help='vcd file to draw diagram from',metavar='VCD FILE')
+    parser.add_argument('texfile',help='tex file to write diagram to',metavar='LATEX FILE')
+    parser.add_argument('-v','--verbose',help='outputs logging to console',nargs='?',default='notset',metavar='LOG LEVEL',choices=['DEBUG','debug','INFO','info','WARNING','warning','ERROR','error','CRITICAL','critical'])
+    parser.add_argument('-b','--begin',help='beginning time of diagram',metavar='TIME')
+    parser.add_argument('-e','--end',help='end time of diagram',metavar='TIME')
+    parser.add_argument('-s','--scale',help='scale of diagram')
+    parser.add_argument('-t','--transitions',help='transitions of single bit signals in diagram',action='store_true')
+    parser.add_argument('-i','--input_ready',help='diagram ready to use with the \input LaTeX command, usually inside a figure environment',action='store_true')
+    # parser.add_argument('-p','--preamble_input_ready',help='required packages and set up is ready to use with the \input LaTeX command so you can easily place it in the preamble of your document',action='store_true')
+    parser.add_argument('-a','--axis',help='include a timing axis in diagram',action='store_true')
+    parser.add_argument('--settings',help='store something to settings for future uses')
+    args = parser.parse_args()
+
+    # logger.debug('Finished parsing arguments.')
 try:
-    os.remove(fns[0] + '.tmp')
-    os.remove(fns[0] + '.tex')
+    if args.verbose.lower() == 'debug':
+        # print('here')
+        logger.setLevel(logging.DEBUG)
+    elif args.verbose.lower() == 'info':
+        logger.setLevel(logging.INFO)
+    elif args.verbose.lower() == 'warning':
+        logger.setLevel(logging.WARNING)
+    elif args.verbose.lower() == 'error':
+        logger.setLevel(logging.ERROR)
+    elif args.verbose.lower() == 'critical':
+        logger.setLevel(logging.CRITICAL)
+    else:
+        logger.setLevel(logging.WARNING)
+except AttributeError:
+    logger.setLevel(logging.WARNING)
+    
+# set a format which is simpler for console use
+formatter = logging.Formatter('%(name)-12s: %(levelname)-8s %(message)s')
+# tell the handler to use this format
+log_cmd.setFormatter(formatter)
+logger.debug('Set log level for console.')
+
+vcd2tikz = VCD2TikzTiming(args)
+# logger.
+vcd2tikz.check_errs()
+vcd2tikz.build_defaults()
+vcd2tikz.build_template()
+data = vcd2tikz.build_dataset()
+fnames = vcd2tikz.write_tikz_temps(data)
+logger.debug('Files to be cleared out: \n{}'.format(pprint.pformat(fnames)))
+vcd2tikz.clean(fnames)
+# print(fnames)
+try:
+    log_file.close()
 except:
     pass
-
-with open(fns[0] + '.tmp','a+') as template:
-    template.writelines(bof)
-    template.writelines(eof)
-
-with open(fns[0] + '.tex','w+') as final:
-    os.system('latexpand ' + fns[0] + '.tmp > ' + fns[0] + '.tex')
-
-try:
-    os.remove(fns[0] + '.tmp')
-    os.remove(fns[0] + '_timecodes.tex')
-    for dmp in fnames:
-        os.remove(dmp)
-except:
-    pass
-
