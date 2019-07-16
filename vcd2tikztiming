@@ -16,6 +16,7 @@ import pprint
 import tempfile
 import argparse
 import logging
+# import math
 from Verilog_VCD import parse_vcd, get_endtime
 path_to_this = os.path.split(__file__)[0]
 log_fname = path_to_this+'/vcd2tikz.log'
@@ -86,9 +87,16 @@ class VCD2TikzTiming:
         except FileNotFoundError as err:
             msg = 'Could not find header file. Check your installation setup and try again.'
             raise ImproperSetupError(msg)
+        # logger.debug('  \\providecommand\\timeEnd{0}\\renewcommand\\timeEnd{'+str(int(self.args.end/self.args.scale)+'}\n'))
+        self.args.end = int(self.args.end)
+        self.args.begin = int(self.args.begin)
+        adj_begin = self.args.begin*self.args.scale
+        adj_end = self.args.end*self.args.scale
+        logger.debug(adj_end)
+        # exit()
 
-        self.w_timecodes = ('  \\providecommand\\timeStart{0}\\renewcommand\\timeStart{'+str(self.args.begin*1./self.args.scale)+'.0}\n'
-                            '  \\providecommand\\timeEnd{0}\\renewcommand\\timeEnd{'+str(self.args.end*1./self.args.scale)+'}\n')
+        self.w_timecodes = ('  \\providecommand\\timeStart{0}\\renewcommand\\timeStart{'+str(int(self.args.begin/self.args.scale))+'.0}\n'
+                            '  \\providecommand\\timeEnd{0}\\renewcommand\\timeEnd{'+str(int(self.args.end/self.args.scale))+'}\n')
         with open(self.timecodes_path,'w+') as f_timecodes:
             f_timecodes.writelines(self.w_timecodes)
         if not self.args.axis and not self.args.input_ready:
@@ -195,8 +203,8 @@ class VCD2TikzTiming:
                 }
 
             except IndexError:
+                logger.debug('Handled index error during dataset build.')
                 pass
-
         return data
 
     def write_tikz_temps(self,data):
@@ -206,7 +214,10 @@ class VCD2TikzTiming:
         for d in data:
             logger.debug('Iterating through data, at {}'.format(d))
             s = d + " & "
-            for i in data[d][1]:
+            for c,i in enumerate(data[d][1]):
+                # Skip the last one
+                if c == len(data[d][1]) - 1:
+                    break
                 # logger.debug('Iterating through data[d][1], at {}'.format(i))
                 # First check if the signal is high impedance or unknown/don't care
                 # logger.info('i[1] is {}'.format(i[1]))
@@ -238,7 +249,12 @@ class VCD2TikzTiming:
                 else:
                     # Eventually move this out of the if block since it should happen for both cases
                     try:
-                        s = s + str(i[0]) + "D{" + hex(int(i[1], 2)) + "}"
+                        if self.args.font is None:
+                            s = s + str(i[0]) + "D{" + hex(int(i[1], 2)) + "}"
+                        else:
+                            beg = 'D{[font=\\%s]' % self.args.font                            
+                            s = s + str(i[0]) + beg + hex(int(i[1], 2)) + "}"
+                            
                     except:
                         if (i[1] == 'x' or i[1] == 'X'):
                             s = s + str(i[0]) + 'U'
@@ -246,9 +262,10 @@ class VCD2TikzTiming:
             s = s + " \\\\\n"
             fname = sig_dump_base_name + "_" + d + ".dmp"
             fnames.append(fname)
-            f = open(fname, "w")
-            f.write(s)
-            f.close()
+
+            with open(fname,'w+') as f:
+            # f = open(fname, "w")
+                f.write(s)
 
         return fnames
 
@@ -310,6 +327,7 @@ if __name__ == '__main__':
     parser.add_argument('-i','--input_ready',help='diagram ready to use with the \input LaTeX command, usually inside a figure environment',action='store_true')
     # parser.add_argument('-p','--preamble_input_ready',help='required packages and set up is ready to use with the \input LaTeX command so you can easily place it in the preamble of your document',action='store_true')
     parser.add_argument('-a','--axis',help='include a timing axis in diagram',action='store_true')
+    parser.add_argument('--font',help='specify font family (defaults to no specification if not used)',metavar='FONTFAMILY')
     parser.add_argument('--settings',help='store something to settings for future uses')
     args = parser.parse_args()
 
