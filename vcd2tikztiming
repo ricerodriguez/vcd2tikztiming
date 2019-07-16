@@ -54,7 +54,7 @@ class VCD2TikzTiming:
         logger.debug('Arguments stored.')
         self.templates_path = os.path.join(path_to_this,'templates')
         self.header_path = os.path.join(self.templates_path,'header.tex')
-        self.timecodes_path = self.args.texfile[:-4] + '_timecodes.tex'
+        # self.timecodes_path = self.args.texfile[:-4] + '_timecodes.tex'
 
     def check_errs(self):
         # First check if VCD file is valid
@@ -91,18 +91,18 @@ class VCD2TikzTiming:
         
         self.args.end = int(self.args.end)
         self.args.begin = int(self.args.begin)
-        adj_begin = self.args.begin*self.args.scale
-        adj_end = self.args.end*self.args.scale
-        logger.debug(adj_end)
-        time_bounds = dict(begin=self.args.begin,end=self.args.end)
-        with open(os.path.join(self.templates_path,'timecodes.tmp')) as f:
-            t_timecodes = Template(f.read())
-            self.w_timecodes = t_timecodes.substitute(begin=int(self.args.begin/self.args.scale), end=int(self.args.end/self.args.scale))
+        if self.args.font is None:
+            self.args.font = sffamily
+        d = dict(xscale=1,font=self.args.font,begin=int(self.args.begin/self.args.scale),end=int(self.args.end/self.args.scale))
+        # time_bounds = dict(begin=self.args.begin,end=self.args.end)
+        # with open(os.path.join(self.templates_path,'timecodes.tmp')) as f:
+        #     t_timecodes = Template(f.read())
+        #     self.w_timecodes = t_timecodes.substitute(begin=int(self.args.begin/self.args.scale), end=int(self.args.end/self.args.scale))
         
         # self.w_timecodes = ('  \\providecommand\\timeStart{0}\\renewcommand\\timeStart{'+str(int(self.args.begin/self.args.scale))+'.0}\n'
                             # '  \\providecommand\\timeEnd{0}\\renewcommand\\timeEnd{'+str(int(self.args.end/self.args.scale))+'}\n')
-        with open(self.timecodes_path,'w+') as f_timecodes:
-            f_timecodes.write(self.w_timecodes)
+        # with open(self.timecodes_path,'w+') as f_timecodes:
+        #     f_timecodes.write(self.w_timecodes)
         if not self.args.axis and not self.args.input_ready:
             try:
                 with open(os.path.join(self.templates_path,'bof-00.tex')) as f:
@@ -118,7 +118,7 @@ class VCD2TikzTiming:
                     self.w_bof = f.readlines()
                 with open(os.path.join(self.templates_path,'eof-01.tex')) as f:
                     self.w_eof = f.readlines()
-                    self.w_eof[1] = '    \\input{%s_timecodes.tex}' % self.args.texfile[:-4]
+                    # self.w_eof[1] = '    \\input{%s_timecodes.tex}' % self.args.texfile[:-4]
             except FileNotFoundError:
                 msg = 'Could not find template file. Check your installation setup and try again.'
                 raise ImproperSetupError(msg)
@@ -137,17 +137,21 @@ class VCD2TikzTiming:
                     self.w_bof = f.readlines()
                 with open(os.path.join(self.templates_path,'eof-11.tex')) as f:
                     self.w_eof = f.readlines()
-                    self.w_eof[1] = '    \\input{%s_timecodes.tex}' % self.args.texfile[:-4]
+                    # self.w_eof[1] = '    \\input{%s_timecodes.tex}' % self.args.texfile[:-4]
             except FileNotFoundError:
                 msg = 'Could not find template file. Check your installation setup and try again.'
                 raise ImproperSetupError(msg)
+        
         for i,line in enumerate(self.w_bof):
             if '$' in line:
                 t_line = Template(line)
-                if self.args.font is None:
-                    self.args.font = sffamily
-                d = dict(xscale=1,font=self.args.font)
                 self.w_bof[i] = t_line.substitute(d)
+            else:
+                continue
+        for i,line in enumerate(self.w_eof):
+            if '$' in line:
+                t_line = Template(line)
+                self.w_eof[i] = t_line.substitute(d)
             else:
                 continue
 
@@ -312,12 +316,12 @@ class VCD2TikzTiming:
             logger.warning('Could not remove temp file')
             pass
         
-        try:
-            os.remove(self.args.texfile[:-4]+'_timecodes.tex')
-            logger.debug('Cleaned out the timecodes file')
-        except FileNotFoundError:
-            logger.warning('Could not remove timecodes file')
-            pass
+        # try:
+        #     os.remove(self.args.texfile[:-4]+'_timecodes.tex')
+        #     logger.debug('Cleaned out the timecodes file')
+        # except FileNotFoundError:
+        #     logger.warning('Could not remove timecodes file')
+        #     pass
 
         for dmp in fnames:
             try:
