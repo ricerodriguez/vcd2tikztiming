@@ -141,6 +141,15 @@ class VCD2TikzTiming:
             except FileNotFoundError:
                 msg = 'Could not find template file. Check your installation setup and try again.'
                 raise ImproperSetupError(msg)
+        for i,line in enumerate(self.w_bof):
+            if '$' in line:
+                t_line = Template(line)
+                if self.args.font is None:
+                    self.args.font = sffamily
+                d = dict(xscale=1,font=self.args.font)
+                self.w_bof[i] = t_line.substitute(d)
+            else:
+                continue
 
     def build_dataset(self):
         sig_dump_base_name = self.args.texfile[:-4]
