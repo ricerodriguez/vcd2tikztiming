@@ -17,6 +17,7 @@ import tempfile
 import argparse
 import logging
 # import math
+from string import Template
 from Verilog_VCD import parse_vcd, get_endtime
 path_to_this = os.path.split(__file__)[0]
 log_fname = path_to_this+'/vcd2tikz.log'
@@ -87,18 +88,21 @@ class VCD2TikzTiming:
         except FileNotFoundError as err:
             msg = 'Could not find header file. Check your installation setup and try again.'
             raise ImproperSetupError(msg)
-        # logger.debug('  \\providecommand\\timeEnd{0}\\renewcommand\\timeEnd{'+str(int(self.args.end/self.args.scale)+'}\n'))
+        
         self.args.end = int(self.args.end)
         self.args.begin = int(self.args.begin)
         adj_begin = self.args.begin*self.args.scale
         adj_end = self.args.end*self.args.scale
         logger.debug(adj_end)
-        # exit()
-
-        self.w_timecodes = ('  \\providecommand\\timeStart{0}\\renewcommand\\timeStart{'+str(int(self.args.begin/self.args.scale))+'.0}\n'
-                            '  \\providecommand\\timeEnd{0}\\renewcommand\\timeEnd{'+str(int(self.args.end/self.args.scale))+'}\n')
+        time_bounds = dict(begin=self.args.begin,end=self.args.end)
+        with open(os.path.join(self.templates_path,'timecodes.tmp')) as f:
+            t_timecodes = Template(f.read())
+            self.w_timecodes = t_timecodes.substitute(begin=int(self.args.begin/self.args.scale), end=int(self.args.end/self.args.scale))
+        
+        # self.w_timecodes = ('  \\providecommand\\timeStart{0}\\renewcommand\\timeStart{'+str(int(self.args.begin/self.args.scale))+'.0}\n'
+                            # '  \\providecommand\\timeEnd{0}\\renewcommand\\timeEnd{'+str(int(self.args.end/self.args.scale))+'}\n')
         with open(self.timecodes_path,'w+') as f_timecodes:
-            f_timecodes.writelines(self.w_timecodes)
+            f_timecodes.write(self.w_timecodes)
         if not self.args.axis and not self.args.input_ready:
             try:
                 with open(os.path.join(self.templates_path,'bof-00.tex')) as f:
