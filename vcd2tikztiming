@@ -252,17 +252,18 @@ class VCD2TikzTiming:
                     else:
                         s = s + str(i[0]) + "U"
                 else:
-                    # Eventually move this out of the if block since it should happen for both cases
-                    try:
-                        if self.args.font is None:
-                            s = s + str(i[0]) + "D{" + hex(int(i[1], 2)) + "}"
-                        else:
-                            beg = 'D{[font=\\%s]' % self.args.font                            
-                            s = s + str(i[0]) + beg + hex(int(i[1], 2)) + "}"
+                    if self.args.font is None:
+                        tmp_ss = '${i0} D{${val}}'
+                    else:
+                        tmp_ss = '${i0} D{[font=\${font}] ${val}}'
                             
-                    except:
-                        if (i[1] == 'x' or i[1] == 'X'):
-                            s = s + str(i[0]) + 'U'
+                    tmp_v = hex(int(i[1],2))                            
+                    tmp_s = Template(tmp_ss)
+                    if self.args.upper:
+                        tmp_v=tmp_v.upper()
+                    if not self.args.prefix:
+                        tmp_v=tmp_v[2:]
+                    s += tmp_s.substitute(i0=i[0],val=tmp_v,font=self.args.font)
                     
             s = s + " \\\\\n"
             fname = sig_dump_base_name + "_" + d + ".dmp"
@@ -326,6 +327,8 @@ if __name__ == '__main__':
     # parser.add_argument('-p','--preamble_input_ready',help='required packages and set up is ready to use with the \input LaTeX command so you can easily place it in the preamble of your document',action='store_true')
     parser.add_argument('-a','--axis',help='include a timing axis in diagram',action='store_true')
     parser.add_argument('--font',help='specify font family (defaults to no specification if not used)',metavar='FONTFAMILY')
+    parser.add_argument('--upper',help='capitalize the letters of hex signals',action='store_true')
+    parser.add_argument('--prefix',help='include the \'0x\' in hex signals',action='store_true')
     parser.add_argument('--settings',help='store something to settings for future uses')
     args = parser.parse_args()
 
