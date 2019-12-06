@@ -1,0 +1,292 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+__author__ = "Ernst Blecha, Victoria (Rice) Rodriguez"
+__copyright__ = "Copyright 2018"
+__credits__ = ["Florian Dietachmayr",
+               "Sameer Gauria"]
+__license__ = "GPL"
+__version__ = "0.0.2"
+__maintainer__ = "Victoria (Rice) Rodriguez" # of this fork, Ernst Blecha is probably still maintaining the original
+__email__ = "rice.rodriguez@ttu.edu"
+__status__ = "Prototype"
+
+# TODO:
+# Change templating system to single template.
+# Change transition thing from clock since it isn't guaranteed to work.
+# Get rid of the need for latexpand
+import os
+import sys
+import pprint
+import tempfile
+import argparse
+import logging
+from string import Template
+from Verilog_VCD import parse_vcd, get_endtime
+from resources import TeXTemplate, build_template
+path_to_this = os.path.split(__file__)[0]
+log_fname = path_to_this+'/verilog2tikz.log'
+logging.basicConfig(filename=log_fname)
+try:
+    os.remove(log_fname)
+except FileNotFoundError:
+    log_file = open(log_fname,'w+')
+logger = logging.getLogger('Verilog2Tikz')
+log_cmd = logging.StreamHandler()
+logger.addHandler(log_cmd)
+
+class Error(Exception):
+    pass
+
+class InvalidVCDError(Error):
+    def __init__(self,msg):
+        self.msg=msg
+        logger.error(msg)
+
+class InputReadyArgsError(Error):
+    def __init__(self,msg):
+        self.msg=msg
+        logger.error(msg)
+
+class ImproperSetupError(Error):
+    def __init__(self,msg):
+        self.msg=msg
+        logger.error(msg)
+
+class Verilog2Tikz:
+    def __init__(self,args):
+        self.args = args
+        logger.debug('Arguments stored.')
+        try:
+            self.check_errs()
+        except InvalidVCDError:
+            sys.exit(-1)
+        # self.templates_path = os.path.join(path_to_this,'templates')
+        # self.header_path = os.path.join(self.templates_path,'header.tex')
+        # self.timecodes_path = self.args.texfile[:-4] + '_timecodes.tex'
+
+    def check_errs(self):
+        # First check if VCD file is valid
+        try:
+            logger.debug('Checking if VCD is a valid file...')
+            self.vcd_parsed = parse_vcd(self.args.dumpfile)
+        except:
+            msg = f'The file {self.args.dumpfile} either does not exist or is not a valid VCD file. Please try again.'
+            raise InvalidVCDError(msg)
+
+        logger.debug('VCD file is valid.')        
+
+    # Eventually deprecate this with just using defaults from argparse
+    def build_defaults(self):
+        if self.args.font is None:
+            self.args.font = "sffamily"
+        if self.args.scale is None:
+            logger.debug('User did not provide scale, using 1000 (ns) as default.')
+            self.args.scale = 1000
+        if self.args.begin is None:
+            logger.debug('User did not provide begin time, using 0 as default.')
+            self.args.begin = 0
+        else:
+            logger.debug('Adjusting beginning to scale')
+            self.args.begin = self.args.begin * self.args.scale
+
+        if self.args.end is None:
+            logger.debug('User did not provide end time, using Verilog to VCD package to determine end time.')
+            self.args.end = get_endtime()
+
+        else:
+            logger.debug('Adjusting end to scale')
+            self.args.end = self.args.end * self.args.scale
+
+
+    def build_dataset(self):
+        sig_dump_base_name = self.args.texfile[:-4]
+        data = {}
+        vcd = self.vcd_parsed
+        # Gather the useful information from parsing the VCD
+        for d in vcd:
+            tv = [(t[0], t[1], i) for i, t in enumerate(vcd[d]['tv'])]
+            logger.info('Value of tv is {}'.format(pprint.pformat(tv)))
+            results = [(t[0], t[1], t[2]) for t in tv if t[0] > self.args.begin and t[0] < self.args.end]
+            logger.info('Value of results is {}'.format(pprint.pformat(results)))
+            try:
+                if results[0][0] > self.args.begin and results[0][2] > 0:
+                    results.insert(
+                        0, (
+                            self.args.begin,
+                            tv[results[0][2] - 1][1],
+                            tv[results[0][2] - 1][2]
+                        )
+                    )
+                    
+                if results[-1][0] < self.args.end and results[-1][2] < tv[-1][2]:
+                    results.append(
+                        (
+                            self.args.end,
+                            tv[results[-1][2] + 1][1],
+                            tv[results[-1][2] + 1][2]
+                        )
+                    )
+
+                u = results[0]
+                dv = []
+                for v in results[1:]:
+                    dv.append(
+                        (
+                            (v[0]-u[0])*1./self.args.scale,
+                            u[1]
+                        )
+                    )
+                    u = v
+                dv.append(
+                    (
+                        (self.args.end-u[0])*1./self.args.scale,
+                        u[1]
+                    )
+                )
+                name_fix = str(vcd[d]['nets'][0]['name']).replace('_','\_')
+                logger.debug('Fixed name: {}'.format(name_fix))
+                data = {
+                    **data,
+                    **dict(
+                        [
+                            (
+                                name_fix,
+                                (
+                                    vcd[d]['nets'][0]['size'],
+                                    dv
+                                )
+                            )
+                        ]
+                    )
+                }
+
+            except IndexError:
+                logger.debug('Handled index error during dataset build.')
+                pass
+        return data
+
+    def write_tikz_timing(self,data):
+        # fnames = []
+        # sig_dump_base_name = self.args.texfile[:-4]
+        logger.info('Dataset: \n{}'.format(pprint.pformat(data)))
+        s=None
+        for d in data:
+            logger.debug('Iterating through data, at {}'.format(d))
+            s = d + " & "
+            for c,i in enumerate(data[d][1]):
+                # Skip the last one
+                if c == len(data[d][1]) - 1:
+                    break
+                # First check if the signal is high impedance or unknown/don't care
+                if i[1] == "z" or i[1] == "Z":
+                    logger.debug('Found high impedance in signal.')
+                    s = s + str(i[0]) + "Z"
+                elif i[1] == "x" or i[1] == "X":
+                    logger.debug('Found unknown in signal.')
+                    s = s + str(i[0]) + "X"
+                if data[d][0] == "1":
+                    if i[0] == 0:
+                        s = s + "G"
+                    elif i[1] == "0":
+                        if (d == 'clk'):
+                            s = s + str(i[0]) + 'C'
+                        # elif self.args.transitions:
+                        #     s = s + str(i[0]) + "L"
+                        else:
+                            s = s + str(i[0]) + "L"
+                            # s = s + str(i[0]) + 'C'
+                    elif i[1] == "1":
+                        if (d == 'clk'):
+                            s = s + str(i[0]) + 'C'
+                        # elif self.args.transitions:
+                        #     s = s + str(i[0]) + "H"
+                        else:
+                            s = s + str(i[0]) + "H"
+                            # s = s + str(i[0]) + 'C'
+                    else:
+                        s = s + str(i[0]) + "U"
+                else:
+                    if self.args.font is None:
+                        tmp_ss = '${i0} D{${val}}'
+                    else:
+                        tmp_ss = '${i0} D{[font=\${font}] ${val}}'
+                    try:
+                        tmp_v = hex(int(i[1],2))                            
+                        tmp_s = Template(tmp_ss)
+                        if self.args.upper:
+                            tmp_v=tmp_v.upper()
+                        if not self.args.prefix:
+                            tmp_v=tmp_v[2:]
+                        s += tmp_s.substitute(i0=i[0],val=tmp_v,font=self.args.font)
+                    except ValueError:
+                        logger.warning('Received ValueError, ignoring')
+                        pass
+            s = s + " \\\\\n"
+        return s
+
+    def write_tex(self,tikz_timing):
+        logger.debug('Began building template')
+        # print(pprint.pformat(vars(self.args)))
+        args=vars(self.args)
+        args['tikz_timing']=tikz_timing
+        print(pprint.pformat(args))
+        try:
+            tex=build_template(args)
+            with open(self.args.texfile,'w+') as f:
+                f.write(tex)
+        except FileNotFoundError as err:
+            logging.error(err)
+            msg='Couldn\'t find the template file. Check your installation and try again.'
+            raise ImproperSetupError(msg)
+        
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='Converts VCD files to tikz-timing compatible files')
+    parser.add_argument('dumpfile',help='vcd file to draw diagram from',metavar='VCD FILE')
+    parser.add_argument('texfile',help='tex file to write diagram to',metavar='LATEX FILE')
+    parser.add_argument('-v','--verbose',help='outputs logging to console',nargs='?',default='notset',metavar='LOG LEVEL',choices=['DEBUG','debug','INFO','info','WARNING','warning','ERROR','error','CRITICAL','critical'])
+    parser.add_argument('-b','--begin',help='beginning time of diagram',metavar='TIME',type=int)
+    parser.add_argument('-e','--end',help='end time of diagram',metavar='TIME',type=int)
+    parser.add_argument('-s','--scale',help='scale of diagram',type=int)
+    parser.add_argument('-t','--transitions',help='transitions of single bit signals in diagram',action='store_true')
+    parser.add_argument('-i','--input_ready',help='diagram ready to use with the \input LaTeX command, usually inside a figure environment',action='store_true')
+    # parser.add_argument('-p','--preamble_input_ready',help='required packages and set up is ready to use with the \input LaTeX command so you can easily place it in the preamble of your document',action='store_true')
+    parser.add_argument('-a','--axis',help='include a timing axis in diagram',action='store_true')
+    parser.add_argument('--font',help='specify font family (defaults to no specification if not used)',metavar='FONTFAMILY')
+    parser.add_argument('--upper',help='capitalize the letters of hex signals',action='store_true')
+    parser.add_argument('--prefix',help='include the \'0x\' in hex signals',action='store_true')
+    parser.add_argument('--settings',help='store something to settings for future uses')
+    args = parser.parse_args()
+
+try:
+    if args.verbose.lower() == 'debug':
+        logger.setLevel(logging.DEBUG)
+    elif args.verbose.lower() == 'info':
+        logger.setLevel(logging.INFO)
+    elif args.verbose.lower() == 'warning':
+        logger.setLevel(logging.WARNING)
+    elif args.verbose.lower() == 'error':
+        logger.setLevel(logging.ERROR)
+    elif args.verbose.lower() == 'critical':
+        logger.setLevel(logging.CRITICAL)
+    else:
+        logger.setLevel(logging.WARNING)
+except AttributeError:
+    logger.setLevel(logging.WARNING)
+    
+# set a format which is simpler for console use
+formatter = logging.Formatter('%(name)-12s: %(levelname)-8s %(message)s')
+# tell the handler to use this format
+log_cmd.setFormatter(formatter)
+logger.debug('Set log level for console.')
+
+v2t = Verilog2Tikz(args)
+v2t.check_errs()
+v2t.build_defaults()
+data = v2t.build_dataset()
+tikz_timing = v2t.write_tikz_timing(data)
+v2t.write_tex(tikz_timing)
+
+try:
+    log_file.close()
+except:
+    pass
