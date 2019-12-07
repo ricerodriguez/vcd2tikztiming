@@ -229,7 +229,7 @@ class Verilog2Tikz:
         # print(pprint.pformat(vars(self.args)))
         args=vars(self.args)
         args['tikz_timing']=tikz_timing
-        print(pprint.pformat(args))
+        # print(pprint.pformat(args))
         try:
             tex=build_template(args)
             with open(self.args.texfile,'w+') as f:
@@ -241,13 +241,13 @@ class Verilog2Tikz:
         
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Converts VCD files to tikz-timing compatible files')
-    parser.add_argument('dumpfile',help='vcd file to draw diagram from',metavar='VCD FILE')
-    parser.add_argument('texfile',help='tex file to write diagram to',metavar='LATEX FILE')
+    parser.add_argument('dumpfile',help='vcd file to draw diagram from',metavar='vcd_file')
+    parser.add_argument('texfile',help='tex file to write diagram to',metavar='latex_file')
     parser.add_argument('-v','--verbose',help='outputs logging to console',nargs='?',default='notset',metavar='LOG LEVEL',choices=['DEBUG','debug','INFO','info','WARNING','warning','ERROR','error','CRITICAL','critical'])
     parser.add_argument('-b','--begin',help='beginning time of diagram',metavar='TIME',type=int)
     parser.add_argument('-e','--end',help='end time of diagram',metavar='TIME',type=int)
     parser.add_argument('-s','--scale',help='scale of diagram',type=int)
-    parser.add_argument('-t','--transitions',help='transitions of single bit signals in diagram',action='store_true')
+    # parser.add_argument('-t','--transitions',help='transitions of single bit signals in diagram',action='store_true')
     parser.add_argument('-i','--input_ready',help='diagram ready to use with the \input LaTeX command, usually inside a figure environment',action='store_true')
     # parser.add_argument('-p','--preamble_input_ready',help='required packages and set up is ready to use with the \input LaTeX command so you can easily place it in the preamble of your document',action='store_true')
     parser.add_argument('-a','--axis',help='include a timing axis in diagram',action='store_true')

@@ -23,17 +23,16 @@ def build_template (args):
     """
     class_declaration = '\documentclass{article}' if not args['input_ready'] else ''
     package_header = '% In your main document, please include the following packages: \n' if args['input_ready'] else ''
+    if (args['axis'] and not args['input_ready']):
+        packages='\\usepackage[active,tightpage]{preview}\n\\usepackage{tikz-timing}\n\\usepackage{fp}\n\\usepackage{siunitx}\n'
+    elif (args['axis'] and args['input_ready']):
+        packages='% \\usepackage{tikz-timing}\n% \\usepackage{fp}\n% \\usepackage{siunitx}\n'
+    elif (not args['axis'] and args['input_ready']):
+        packages='% \\usepackage{tikz-timing}\n'
+    # not args[axis] and not args[input_ready]
+    else:
+        packages='\\usepackage{tikz-timing}\n'
 
-    # All possible values for packages
-    all_packages = {
-        args['axis'] and not args['input_ready']: '\\usepackage[active,tightpage]{preview}\n\\usepackage{tikz-timing}\n\\usepackage{fp}\n\\usepackage{siunitx}\n',
-        args['axis'] and args['input_ready']: '% \\usepackage{tikz-timing}\n% \\usepackage{fp}\n% \\usepackage{siunitx}\n',
-        not args['axis'] and args['input_ready']: '% \\usepackage{tikz-timing}\n',
-        not args['axis'] and not args['input_ready']: '\\usepackage{tikz-timing}\n'
-    }
-
-    # Choose the one based off the two arguments
-    packages = all_packages.get(args['axis'] and args['input_ready'])
     extras_header = '% In your main document, uncomment the following code and place it in\nthe preamble of your document:\n' if args['axis'] and args['input_ready'] else ''
     extras = '''\providecommand\timeStart{0}
     \newcommand{\timingaxis}[1][1] {
