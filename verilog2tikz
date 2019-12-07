@@ -11,13 +11,10 @@ __email__ = "rice.rodriguez@ttu.edu"
 __status__ = "Prototype"
 
 # TODO:
-# Change templating system to single template.
-# Change transition thing from clock since it isn't guaranteed to work.
-# Get rid of the need for latexpand
+
 import os
 import sys
 import pprint
-import tempfile
 import argparse
 import logging
 from string import Template
